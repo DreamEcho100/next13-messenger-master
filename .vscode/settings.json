@@ -1,5 +1,3 @@
 {
-	"marquee.widgets.npm-stats.packageNames": [
-		"next13-messenger"
-	]
+	"marquee.widgets.npm-stats.packageNames": ["next13-messenger"]
 }
