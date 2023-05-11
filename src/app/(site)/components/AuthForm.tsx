@@ -1,5 +1,6 @@
 'use client';
 
+import { useMutation } from '@tanstack/react-query';
 // import axios from "axios";
 import { signIn, useSession } from 'next-auth/react';
 import { useCallback, useEffect, useState } from 'react';
@@ -14,11 +15,77 @@ import { toast } from 'react-hot-toast';
 
 type Variant = 'LOGIN' | 'REGISTER';
 
+type SocialAction = 'github' | 'google';
+
 const AuthForm = () => {
 	const session = useSession();
 	const router = useRouter();
+	const {
+		register,
+		handleSubmit,
+		formState: { errors }
+	} = useForm<FieldValues>({
+		defaultValues: {
+			name: '',
+			email: '',
+			password: ''
+		}
+	});
 	const [variant, setVariant] = useState<Variant>('LOGIN');
-	const [isLoading, setIsLoading] = useState(false);
+	const submitQuery = useMutation<
+		| {
+				socialAction: SocialAction;
+				result: unknown;
+		  }
+		| {
+				variant: Variant;
+				input: FieldValues;
+				result: unknown;
+		  },
+		{ message: string },
+		{ fieldValues: FieldValues } | { socialAction: SocialAction }
+	>(
+		async (input) => {
+			if ('socialAction' in input) {
+				return {
+					socialAction: input.socialAction,
+					result: await signIn(input.socialAction, { redirect: false })
+				};
+			}
+
+			if (variant === 'LOGIN')
+				return {
+					variant,
+					input,
+					result: await signIn('credentials', {
+						...input,
+						redirect: false
+					})
+				};
+
+			return {
+				variant,
+				input,
+				result: await fetch('/api/register', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify(input)
+				})
+			};
+		},
+		{
+			onError: (err) => toast.error(err.message),
+			onSuccess: async (result) => {
+				if ('variant' in result && result.variant === 'REGISTER') {
+					await signIn('credentials', {
+						...result.input,
+						redirect: false
+					});
+				}
+				router.push('/conversations');
+			}
+		}
+	);
 
 	useEffect(() => {
 		if (session?.status === 'authenticated') {
@@ -34,77 +101,8 @@ const AuthForm = () => {
 		}
 	}, [variant]);
 
-	const {
-		register,
-		handleSubmit,
-		formState: { errors }
-	} = useForm<FieldValues>({
-		defaultValues: {
-			name: '',
-			email: '',
-			password: ''
-		}
-	});
-
 	const onSubmit: SubmitHandler<FieldValues> = (data: FieldValues) => {
-		setIsLoading(true);
-
-		if (variant === 'REGISTER') {
-			fetch('/api/register', {
-				body: JSON.stringify(data),
-				headers: { 'Content-Type': 'application/json' }
-			})
-				.then(() =>
-					signIn('credentials', {
-						...data,
-						redirect: false
-					})
-				)
-				.then((callback) => {
-					if (callback?.error) {
-						toast.error('Invalid credentials!');
-					}
-
-					if (callback?.ok) {
-						router.push('/conversations');
-					}
-				})
-				.catch(() => toast.error('Something went wrong!'))
-				.finally(() => setIsLoading(false));
-		}
-
-		if (variant === 'LOGIN') {
-			signIn('credentials', {
-				...data,
-				redirect: false
-			})
-				.then((callback) => {
-					if (callback?.error) {
-						toast.error('Invalid credentials!');
-					}
-
-					if (callback?.ok) {
-						router.push('/conversations');
-					}
-				})
-				.finally(() => setIsLoading(false));
-		}
-	};
-
-	const socialAction = (action: string) => {
-		setIsLoading(true);
-
-		signIn(action, { redirect: false })
-			.then((callback) => {
-				if (callback?.error) {
-					toast.error('Invalid credentials!');
-				}
-
-				if (callback?.ok) {
-					router.push('/conversations');
-				}
-			})
-			.finally(() => setIsLoading(false));
+		submitQuery.mutate({ fieldValues: data });
 	};
 
 	return (
@@ -113,7 +111,7 @@ const AuthForm = () => {
 				<form className='space-y-6' onSubmit={handleSubmit(onSubmit)}>
 					{variant === 'REGISTER' && (
 						<Input
-							disabled={isLoading}
+							disabled={submitQuery.isLoading}
 							register={register}
 							errors={errors}
 							required
@@ -122,7 +120,7 @@ const AuthForm = () => {
 						/>
 					)}
 					<Input
-						disabled={isLoading}
+						disabled={submitQuery.isLoading}
 						register={register}
 						errors={errors}
 						required
@@ -131,7 +129,7 @@ const AuthForm = () => {
 						type='email'
 					/>
 					<Input
-						disabled={isLoading}
+						disabled={submitQuery.isLoading}
 						register={register}
 						errors={errors}
 						required
@@ -141,8 +139,8 @@ const AuthForm = () => {
 					/>
 					<div>
 						<Button
-							disabled={isLoading}
-							classVariants={{ w: 'full', disabled: isLoading }}
+							disabled={submitQuery.isLoading}
+							classVariants={{ w: 'full', disabled: submitQuery.isLoading }}
 							type='submit'
 						>
 							{variant === 'LOGIN' ? 'Sign in' : 'Register'}
@@ -165,11 +163,11 @@ const AuthForm = () => {
 					<div className='flex gap-2 mt-6'>
 						<AuthSocialButton
 							icon={BsGithub}
-							onClick={() => socialAction('github')}
+							onClick={() => submitQuery.mutate({ socialAction: 'github' })}
 						/>
 						<AuthSocialButton
 							icon={BsGoogle}
-							onClick={() => socialAction('google')}
+							onClick={() => submitQuery.mutate({ socialAction: 'google' })}
 						/>
 					</div>
 				</div>
